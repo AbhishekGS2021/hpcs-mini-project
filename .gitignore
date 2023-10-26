@@ -1,0 +1,14 @@
+.vscode/
+build/
+CMakeFiles/
+output/
+Testing/
+cmake_install.cmake
+CMakeCache.txt
+CPackConfig.cmake
+CPackSourceConfig.cmake
+CTestTestfile.cmake
+DartConfiguration.tcl
+download.jpeg:Zone.Identifier
+Makefile
+TEST
