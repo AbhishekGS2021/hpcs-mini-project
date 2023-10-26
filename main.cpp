@@ -31,7 +31,7 @@ int main() {
 
                     cv::Mat resultHost;
                     dst.download(resultHost);
-                    cv::imwrite("./output/lbpImg.jpg", resultHost);
+                    cv::imwrite("./output/output_img.jpg", resultHost);
                 } else {
                     cv::Mat dst;
                     cv::bilateralFilter(srcHost,dst,3,1,1);
