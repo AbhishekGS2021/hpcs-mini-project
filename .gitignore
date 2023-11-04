@@ -12,3 +12,5 @@ DartConfiguration.tcl
 download.jpeg:Zone.Identifier
 Makefile
 TEST
+cudaLBP
+main
