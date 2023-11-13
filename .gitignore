@@ -14,3 +14,5 @@ Makefile
 TEST
 cudaLBP
 main
+img/
+*.jpg

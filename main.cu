@@ -3,124 +3,285 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <cuda_runtime.h>
+#include <opencv2/imgproc/imgproc.hpp>
 
+using namespace std;
+using namespace cv;
 
-/**
- * @brief      CUDA safe call.
- *
- * @param[in]  err          The error
- * @param[in]  msg          The message
- * @param[in]  file_name    The file name
- * @param[in]  line_number  The line number
- */
-static inline void _safe_cuda_call(cudaError err, const char* msg, const char* file_name, const int line_number) {
-	if(err!=cudaSuccess) {
-		fprintf(stderr,"%s\n\nFile: %s\n\nLine Number: %d\n\nReason: %s\n",msg,file_name,line_number,cudaGetErrorString(err));
-		std::cin.get();
-		exit(EXIT_FAILURE);
-	}
-}
+__global__ void processImage(float3 *image, int rows, int cols)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-/// Safe call macro.
-#define SAFE_CALL(call,msg) _safe_cuda_call((call),(msg),__FILE__,__LINE__)
-
-/**
- * @brief      BGR to Gray Kernel
- *
- *             This is a simple image processing kernel that converts color
- *             images to black and white by iterating over the individual
- *             pixels.
- *
- * @param      input           The input
- * @param      output          The output
- * @param[in]  width           The width
- * @param[in]  height          The height
- * @param[in]  colorWidthStep  The color width step
- * @param[in]  grayWidthStep   The gray width step
- */
-
-__global__ void bgr_to_gray_kernel(unsigned char* input, unsigned char* output, int width, int height, int colorWidthStep, int grayWidthStep) {
-	//2D Index of current thread
-	const int xIndex = blockIdx.x * blockDim.x + threadIdx.x;
-	const int yIndex = blockIdx.y * blockDim.y + threadIdx.y;
-
-	//Only valid threads perform memory I/O
-	if((xIndex<width) && (yIndex<height))
+	if (x < cols && y < rows)
 	{
-		//Location of colored pixel in input
-		const int color_tid = yIndex * colorWidthStep + (3 * xIndex);
-		
-		//Location of gray pixel in output
-		const int gray_tid  = yIndex * grayWidthStep + xIndex;
 
-		const unsigned char blue	= input[color_tid];
-		const unsigned char green	= input[color_tid + 1];
-		const unsigned char red		= input[color_tid + 2];
+		float n = 0;
+		float p = 0;
 
-		const float gray = red * 0.3f + green * 0.59f + blue * 0.11f;
+		float center1 = image[y * cols + x].x;
+		float center2 = image[y * cols + x].y;
+		float center3 = image[y * cols + x].z;
 
-		output[gray_tid] = static_cast<unsigned char>(gray);
+		float sumcenterx = image[(y)*cols + x + 1].x + image[(y)*cols + x - 1].x + image[(y + 1) * cols + x + 1].x + image[(y + 1) * cols + x].x + image[(y + 1) * cols + x - 1].x + image[(y - 1) * cols + x + 1].x + image[(y - 1) * cols + x].x + image[(y - 1) * cols + x - 1].x;
+		float sumcentery = image[(y)*cols + x + 1].y + image[(y)*cols + x - 1].y + image[(y + 1) * cols + x + 1].y + image[(y + 1) * cols + x].y + image[(y + 1) * cols + x - 1].y + image[(y - 1) * cols + x + 1].y + image[(y - 1) * cols + x].y + image[(y - 1) * cols + x - 1].y;
+		float sumcenterz = image[(y)*cols + x + 1].z + image[(y)*cols + x - 1].z + image[(y + 1) * cols + x + 1].z + image[(y + 1) * cols + x].z + image[(y + 1) * cols + x - 1].z + image[(y - 1) * cols + x + 1].z + image[(y - 1) * cols + x].z + image[(y - 1) * cols + x - 1].z;
+
+		center1 = (0.5) * (center1 + (0.125) * sumcenterx);
+		center2 = (0.5) * (center2 + (0.125) * sumcentery);
+		center3 = (0.5) * (center3 + (0.125) * sumcenterz);
+
+		float codex = 0.0f, codey = 0.0f, codez = 0.0f;
+		float Ax = 0.0f, Ay = 0.0f, Az = 0.0f;
+		float Cx = 0.0f, Cy = 0.0f, Cz = 0.0f;
+		float valuex = 0.0f, valuey = 0.0f, valuez = 0.0f;
+		float onex = 0.0f, oney = 0.0f, onez = 0.0f;
+		int index;
+
+		n = 1;
+		p = 2;
+		index = (y - 1) * cols + x - 1;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		n = 2;
+		p = 3;
+		index = (y - 1) * cols + x;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		n = 3;
+		p = 2;
+		index = (y - 1) * cols + x + 1;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		n = 4;
+		p = 3;
+		index = (y)*cols + x + 1;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		n = 5;
+		p = 2;
+		index = (y + 1) * cols + x + 1;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		n = 6;
+		p = 3;
+		index = (y + 1) * cols + x;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		n = 7;
+		p = 2;
+		index = (y + 1) * cols + x - 1;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		n = 8;
+		p = 3;
+		index = (y)*cols + x - 1;
+		Ax = (image[index].x - center1) / (pow(2, p) - 1 - center1);
+		Cx = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cx = floor(Cx);
+		onex = (image[index].x - center1) > 0 ? 1 : 0;
+		valuex = (onex)*pow(2, (n - 1) * (1 + Ax * Cx));
+
+		Ay = (image[index].y - center2) / (pow(2, p) - 1 - center2);
+		Cy = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cy = floor(Cy);
+		oney = (image[index].y - center2) > 0 ? 1 : 0;
+		valuey = (oney)*pow(2, (n - 1) * (1 + Ay * Cy));
+
+		Az = (image[index].z - center3) / (pow(2, p) - 1 - center3);
+		Cz = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+		Cz = floor(Cz);
+		onez = (image[index].z - center3) > 0 ? 1 : 0;
+		valuez = (onez)*pow(2, (n - 1) * (1 + Az * Cz));
+
+		codex += valuex;
+		codey += valuey;
+		codez += valuez;
+
+		image[(y - 1) * cols + x - 1].x = codex;
+		image[(y - 1) * cols + x - 1].y = codey;
+		image[(y - 1) * cols + x - 1].z = codez;
 	}
 }
 
-void convert_to_gray(const cv::Mat& input, cv::Mat& output) {
-	// Calculate total number of bytes of input and output image
-	const int colorBytes = input.step * input.rows;
-	const int grayBytes = output.step * output.rows;
+int main(int argc, char *argv[])
+{
+	// Read the image
+	Mat img = imread(argv[1], IMREAD_ANYCOLOR);
 
-	unsigned char *d_input, *d_output;
+	Mat fimg = Mat::zeros(img.rows, img.cols, CV_32FC3);
+	img.convertTo(fimg, CV_32FC3);
 
-	// Allocate device memory
-	SAFE_CALL(cudaMalloc<unsigned char>(&d_input,colorBytes),"CUDA Malloc Failed");
-	SAFE_CALL(cudaMalloc<unsigned char>(&d_output,grayBytes),"CUDA Malloc Failed");
+	Mat image = Mat::zeros(img.rows, img.cols, CV_32FC3);
+	cv::cvtColor(fimg, image, COLOR_BGR2HSV);
 
-	// Copy data from OpenCV input image to device memory
-	SAFE_CALL(cudaMemcpy(d_input,input.ptr(),colorBytes,cudaMemcpyHostToDevice),"CUDA Memcpy Host To Device Failed");
+	// Check if the image is of type CV_32FC3
 
-	// Specify a reasonable block size
-	const dim3 block(16,16);
+	// Get the image data pointer
+	float3 *d_image;
+	cudaMalloc(&d_image, image.rows * image.cols * sizeof(float3));
+	cudaMemcpy(d_image, image.ptr<float3>(), image.rows * image.cols * sizeof(float3), cudaMemcpyHostToDevice);
 
-	// Calculate grid size to cover the whole image
-	const dim3 grid((input.cols + block.x - 1)/block.x, (input.rows + block.y - 1)/block.y);
+	// Define block and grid dimensions
+	dim3 block(16, 16);
+	dim3 grid((image.cols + block.x - 1) / block.x, (image.rows + block.y - 1) / block.y);
+	auto start_time = std::chrono::high_resolution_clock::now();
+	// Launch the CUDA kernel
+	processImage<<<grid, block>>>(d_image, image.rows, image.cols);
+	auto end_time = std::chrono::high_resolution_clock::now();
 
-	// Launch the color conversion kernel
-	bgr_to_gray_kernel<<<grid,block>>>(d_input,d_output,input.cols,input.rows,input.step,output.step);
+	auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
 
-	// Synchronize to check for any kernel launch errors
-	SAFE_CALL(cudaDeviceSynchronize(),"Kernel Launch Failed");
+	cout << total_time.count() << endl;
 
-	// Copy back data from destination device meory to OpenCV output image
-	SAFE_CALL(cudaMemcpy(output.ptr(),d_output,grayBytes,cudaMemcpyDeviceToHost),"CUDA Memcpy Host To Device Failed");
+	// Copy the result back to the host
+	cudaMemcpy(image.ptr<float3>(), d_image, image.rows * image.cols * sizeof(float3), cudaMemcpyDeviceToHost);
 
-	// Free the device memory
-	SAFE_CALL(cudaFree(d_input),"CUDA Free Failed");
-	SAFE_CALL(cudaFree(d_output),"CUDA Free Failed");
-}
+	// Free the allocated memory on the device
+	cudaFree(d_image);
 
-int main(int argc, char *argv[]) {
-	// std::string imagePath = "./data/image.jpg";
-
-	// Read input image from the disk
-	cv::Mat input = cv::imread(argv[1],cv::IMREAD_ANYCOLOR);
-
-	if(input.empty()){
-		std::cout<<"Image Not Found!"<<std::endl;
-		std::cin.get();
-		return -1;
-	}
-
-	// Create output image
-	cv::Mat output(input.rows,input.cols,CV_8UC1);
-
-	// Call the wrapper function
-	convert_to_gray(input,output);
-
-	// Show the input and output
-	cv::imshow("Input",input);
-	cv::imshow("Output",output);
-	
-	// Wait for key press
-	cv::waitKey();
+	// Display or save the modified image
+	imwrite("m.jpg", image);
 
 	return 0;
 }
