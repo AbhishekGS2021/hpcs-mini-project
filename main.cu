@@ -265,14 +265,25 @@ int main(int argc, char *argv[])
 	// Define block and grid dimensions
 	dim3 block(16, 16);
 	dim3 grid((image.cols + block.x - 1) / block.x, (image.rows + block.y - 1) / block.y);
-	auto start_time = std::chrono::high_resolution_clock::now();
+	//auto start_time = std::chrono::high_resolution_clock::now();
 	// Launch the CUDA kernel
+	cudaEvent_t start, stop;
+	float elapsed_time_ms;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+	cudaEventRecord(start, 0);
 	processImage<<<grid, block>>>(d_image, image.rows, image.cols);
-	auto end_time = std::chrono::high_resolution_clock::now();
+	cudaEventRecord(stop, 0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsed_time_ms, start ,stop);
 
-	auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+	cout << elapsed_time_ms << endl;
+	
+	//auto end_time = std::chrono::high_resolution_clock::now();
 
-	cout << total_time.count() << endl;
+	//auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+
+	//cout << total_time.count() << endl;
 
 	// Copy the result back to the host
 	cudaMemcpy(image.ptr<float3>(), d_image, image.rows * image.cols * sizeof(float3), cudaMemcpyDeviceToHost);

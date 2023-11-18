@@ -16,3 +16,4 @@ cudaLBP
 main
 img/
 *.jpg
+result*
