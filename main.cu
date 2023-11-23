@@ -1,3 +1,5 @@
+
+
 #include <iostream>
 #include <cstdio>
 #include <opencv2/core/core.hpp>
@@ -7,6 +9,8 @@
 
 using namespace std;
 using namespace cv;
+
+void edlbp(cv::Mat img, cv::Mat newlbpImg, int index, int i, int j);
 
 __global__ void processImage(float3 *image, int rows, int cols)
 {
@@ -255,35 +259,29 @@ int main(int argc, char *argv[])
 	Mat image = Mat::zeros(img.rows, img.cols, CV_32FC3);
 	cv::cvtColor(fimg, image, COLOR_BGR2HSV);
 
-	// Check if the image is of type CV_32FC3
-
 	// Get the image data pointer
 	float3 *d_image;
 	cudaMalloc(&d_image, image.rows * image.cols * sizeof(float3));
 	cudaMemcpy(d_image, image.ptr<float3>(), image.rows * image.cols * sizeof(float3), cudaMemcpyHostToDevice);
 
 	// Define block and grid dimensions
-	dim3 block(16, 16);
+	dim3 block(32, 32);
 	dim3 grid((image.cols + block.x - 1) / block.x, (image.rows + block.y - 1) / block.y);
-	//auto start_time = std::chrono::high_resolution_clock::now();
-	// Launch the CUDA kernel
+
 	cudaEvent_t start, stop;
 	float elapsed_time_ms;
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start, 0);
+
+	// Launch the CUDA kernel
 	processImage<<<grid, block>>>(d_image, image.rows, image.cols);
+
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsed_time_ms, start ,stop);
+	cudaEventElapsedTime(&elapsed_time_ms, start, stop);
 
-	cout << elapsed_time_ms << endl;
-	
-	//auto end_time = std::chrono::high_resolution_clock::now();
-
-	//auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-
-	//cout << total_time.count() << endl;
+	elapsed_time_ms *= 1000;
 
 	// Copy the result back to the host
 	cudaMemcpy(image.ptr<float3>(), d_image, image.rows * image.cols * sizeof(float3), cudaMemcpyDeviceToHost);
@@ -292,7 +290,128 @@ int main(int argc, char *argv[])
 	cudaFree(d_image);
 
 	// Display or save the modified image
-	imwrite("m.jpg", image);
+	//imwrite("m.jpg", image);
+
+	Mat newlbpImg = Mat::zeros(image.rows, image.cols, CV_32FC3);
+
+	auto start_time = std::chrono::high_resolution_clock::now();
+	for (int i = 1; i < newlbpImg.rows; i++)
+	{
+		for (int j = 1; j < newlbpImg.cols; j++)
+		{
+			edlbp(fimg, newlbpImg, 0, i, j);
+			edlbp(fimg, newlbpImg, 1, i, j);
+			edlbp(fimg, newlbpImg, 2, i, j);
+		}
+	}
+	auto end_time = std::chrono::high_resolution_clock::now();
+
+	auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+	int finalt = total_time.count();
+
+	//imwrite("m1.jpg", image);
+
+	cout << "CUDA " << elapsed_time_ms << " Seq " << finalt << " speedup " << finalt / elapsed_time_ms << endl;
 
 	return 0;
+}
+
+void edlbp(cv::Mat img, cv::Mat newlbpImg, int index, int i, int j)
+{
+
+	float n = 0;
+	float p = 0;
+	p = 8;
+
+	float center = img.at<Vec3f>(i, j)[index] + 0.3f;
+	float sumcenter = img.at<Vec3f>(i - 1, j - 1)[index] + img.at<Vec3f>(i - 1, j)[index] + img.at<Vec3f>(i - 1, j + 1)[index] + img.at<Vec3f>(i, j + 1)[index] + img.at<Vec3f>(i + 1, j + 1)[index] + img.at<Vec3f>(i + 1, j)[index] + img.at<Vec3f>(i + 1, j - 1)[index] + img.at<Vec3f>(i, j - 1)[index];
+	center = (0.5) * (center + (0.125) * sumcenter);
+
+	float code = 0;
+	float A = 0.0f;
+	float C = 0.0f;
+	float value = 0.0f;
+	float one = 0.0f;
+
+	n = 1;
+	p = 2;
+	A = (img.at<Vec3f>(i - 1, j - 1)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	one = (img.at<Vec3f>(i - 1, j - 1)[index] - center) > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	n = 2;
+	p = 3;
+	A = (img.at<Vec3f>(i - 1, j)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	value = img.at<Vec3f>(i - 1, j)[index] - center;
+	one = value > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	n = 3;
+	p = 2;
+	A = (img.at<Vec3f>(i - 1, j + 1)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	value = img.at<Vec3f>(i - 1, j + 1)[index] - center;
+	one = value > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	n = 4;
+	p = 3;
+	A = (img.at<Vec3f>(i, j + 1)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	value = img.at<Vec3f>(i, j + 1)[index] - center;
+	one = value > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	n = 5;
+	p = 2;
+	A = (img.at<Vec3f>(i + 1, j + 1)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	value = img.at<Vec3f>(i + 1, j + 1)[index] - center;
+	one = value > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	n = 6;
+	p = 3;
+	A = (img.at<Vec3f>(i + 1, j)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	value = img.at<Vec3f>(i + 1, j)[index] - center;
+	one = value > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	n = 7;
+	p = 2;
+	A = (img.at<Vec3f>(i + 1, j - 1)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	value = img.at<Vec3f>(i + 1, j - 1)[index] - center;
+	one = value > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	n = 8;
+	p = 3;
+	A = (img.at<Vec3f>(i, j - 1)[index] - center) / (pow(2, p) - 1 - center);
+	C = ((-1 * (n - 1) * (n - p)) / (((p - 1) / 2) * ((p - 1) / 2)));
+	C = floor(C);
+	value = img.at<Vec3f>(i, j - 1)[index] - center;
+	one = value > 0 ? 1 : 0;
+	value = (one)*pow(2, (n - 1) * (1 + A * C));
+	code += value;
+
+	newlbpImg.at<Vec3f>(i - 1, j - 1)[index] = code;
 }
